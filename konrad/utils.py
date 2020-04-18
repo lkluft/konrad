@@ -30,6 +30,8 @@ __all__ = [
     'prefix_dict_keys',
     'is_decreasing',
     'calculate_combined_weights',
+    'running_mean',
+    'coarsen_array',
 ]
 
 logger = logging.getLogger(__name__)
@@ -433,3 +435,24 @@ def calculate_combined_weights(weights):
         pij[i, j] = 1 - is_cloudy + (2 * is_cloudy - 1) * weights[j]
 
     return binary_table, np.prod(pij, axis=1)
+
+
+def running_mean(x, N=3):
+    """Calculate a convolution based running mean."""
+    N += int(not (N % 2))  # ensure uneven window size
+
+    # Constant padding of egde values to create a proper "same" mode.
+    arr = np.concatenate(
+        (
+            np.repeat([x[0]], N//2),
+            x,
+            np.repeat([x[-1]], N//2),
+        )
+    )
+
+    return np.convolve(arr, np.ones(N) / N, mode="valid")
+
+
+def coarsen_array(arr, nth=2):
+    """Coarsen an array based on its running mean."""
+    return running_mean(arr, N=nth)[::nth]
