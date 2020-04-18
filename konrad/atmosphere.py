@@ -271,6 +271,45 @@ class Atmosphere(Component):
 
         return new_atmosphere
 
+    def coarsen(self, nth):
+        """Coarsen the vertical grid by roughly the given factor."""
+        from collections import defaultdict
+        from functools import partial
+
+        # Store new pressure grid.
+        phlev = utils.coarsen_array(self['phlev'], nth)
+        plev = utils.plev_from_phlev(phlev)
+        datadict = defaultdict(partial(np.empty, (1, plev.size)))
+
+        datadict['phlev'] = phlev
+        datadict['plev'] = plev
+
+        # Loop over all atmospheric variables...
+        for variable in self.atmosphere_variables:
+            if len(self[variable].shape) == 2:
+                datadict[variable][0] = 0.5 * (
+                    utils.coarsen_array(self[variable][0], nth)[1:] +
+                    utils.coarsen_array(self[variable][0], nth)[:-1]
+                )
+            else:
+                datadict[variable] = 0.5 * (
+                    utils.coarsen_array(self[variable], nth)[1:] +
+                    utils.coarsen_array(self[variable], nth)[:-1]
+                )
+
+        # Create a new atmosphere object from the filled data directory.
+        new_atmosphere = type(self).from_dict(datadict)
+
+        # Keep attributes of original atmosphere object.
+        # This is **extremely** important because references to e.g. the
+        # convection scheme or the humidity handling are stored as attributes!
+        new_atmosphere.attrs.update({**self.attrs})
+
+        # Calculate the geopotential height.
+        new_atmosphere.update_height()
+
+        return new_atmosphere
+
     def copy(self):
         """Create a copy of the atmosphere.
 
