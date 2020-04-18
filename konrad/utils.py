@@ -9,6 +9,7 @@ import numpy as np
 import typhon as ty
 from netCDF4 import Dataset
 from scipy.interpolate import interp1d
+from scipy.stats import norm
 
 from konrad import constants
 
@@ -30,6 +31,8 @@ __all__ = [
     'prefix_dict_keys',
     'is_decreasing',
     'calculate_combined_weights',
+    'running_mean',
+    'coarsen_array',
 ]
 
 logger = logging.getLogger(__name__)
@@ -433,3 +436,31 @@ def calculate_combined_weights(weights):
         pij[i, j] = 1 - is_cloudy + (2 * is_cloudy - 1) * weights[j]
 
     return binary_table, np.prod(pij, axis=1)
+
+
+def running_mean(x, N=3, weights="gaussian"):
+    """Calculate a convolution based running mean."""
+    N += int(not (N % 2))  # ensure uneven window size
+
+    if weights == "linear":
+        w = np.ones(N)
+    elif weights == "gaussian":
+        w = norm().pdf(np.linspace(-1, 1, N))
+    else:
+        raise ValueError("Weight type has to be 'linear' oder 'gaussian'.")
+
+    # Constant padding of egde values to create a proper "same" mode.
+    arr = np.concatenate(
+        (
+            np.repeat([x[0]], N//2),
+            x,
+            np.repeat([x[-1]], N//2),
+        )
+    )
+
+    return np.convolve(arr, w / w.sum(), mode="valid")
+
+
+def coarsen_array(arr, nth=2):
+    """Coarsen an array based on its running mean."""
+    return running_mean(arr, N=nth)[::nth]
