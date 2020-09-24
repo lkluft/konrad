@@ -19,3 +19,20 @@ You can install the latest stable version of ``konrad`` using ``pip``:
 ```bash
 pip install konrad
 ```
+
+Konrad depends on the [CliMT](https://github.com/CliMT/climt) package.
+CliMT handles a variety of underlying FORTRAN code and provides precompiled
+binary wheels for some Python version and operating systems.
+
+However, for Python >=3.8 the FORTRAN libraries need to be compiled locally.
+In this case, you need to specify a C compier, a Fortran compiler, and the
+target architecture using the corresponding environment variables:
+```bash
+CC=gcc FC=gfortran TARGET=HASWELL pip install konrad
+```
+
+On MacOS, you may need to install the GCC compiler suite beforehand:
+```bash
+brew install gcc@10
+CC=gcc-10 FC=gfortran-10 TARGET=HASWELL pip install konrad
+```
