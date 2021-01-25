@@ -297,9 +297,6 @@ class RCE:
             # adjusted values to check if the model has converged.
             T = self.atmosphere['T'].copy()
 
-            # Caculate critical lapse rate.
-            critical_lapserate = self.lapserate(self.atmosphere)
-
             # Apply heatingrates to temperature profile.
             self.atmosphere['T'] += (self.radiation['net_htngrt'] *
                                      self.timestep_days)
@@ -307,7 +304,7 @@ class RCE:
             # Convective adjustment
             self.convection.stabilize(
                 atmosphere=self.atmosphere,
-                lapse=critical_lapserate,
+                lapse=self.lapserate,
                 timestep=self.timestep_days,
                 surface=self.surface,
             )

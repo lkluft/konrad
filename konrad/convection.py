@@ -140,10 +140,11 @@ class Convection(Component, metaclass=abc.ABCMeta):
         """Stabilize the temperature profile by redistributing energy.
 
         Parameters:
-              atmosphere (konrad.atmosphere.Atmosphere): Atmosphere model.
-              lapse (ndarray): Temperature lapse rate [K/day].
-              surface (konrad.surface): Surface model.
-              timestep (float): Timestep width [day].
+            atmosphere (konrad.atmosphere.Atmosphere): Atmosphere model.
+            lapse (konrad.lapserate.LapseRate): Callable `f(p, T)` that
+                returns a temperature lapse rate in [K/day].
+            surface (konrad.surface): Surface model.
+            timestep (float): Timestep width [day].
         """
 
 
@@ -156,15 +157,12 @@ class NonConvective(Convection):
 class HardAdjustment(Convection):
     """Instantaneous adjustment of temperature profiles"""
     def stabilize(self, atmosphere, lapse, surface, timestep):
-
         T_rad = atmosphere['T'][0, :]
         p = atmosphere['plev']
 
         # Find convectively adjusted temperature profile.
         T_new, T_s_new = self.convective_adjustment(
-            p=p,
-            phlev=atmosphere['phlev'],
-            T_rad=T_rad,
+            atmosphere=atmosphere,
             lapse=lapse,
             surface=surface,
             timestep=timestep,
@@ -175,8 +173,7 @@ class HardAdjustment(Convection):
         atmosphere['T'][0, :] = T_new
         surface['temperature'][0] = T_s_new
 
-    def convective_adjustment(self, p, phlev, T_rad, lapse, surface,
-                              timestep=0.1):
+    def convective_adjustment(self, atmosphere, lapse, surface, timestep=0.1):
         """
         Find the energy-conserving temperature profile using upper and lower
         bound profiles (calculated from surface temperature extremes: no change
@@ -186,11 +183,9 @@ class HardAdjustment(Convection):
         conservation.
 
         Parameters:
-            p (ndarray): pressure levels [Pa]
-            phlev (ndarray): half pressure levels [Pa]
-            T_rad (ndarray): old atmospheric temperature profile [K]
-            lapse (ndarray): critical lapse rate [K/m] defined on pressure
-                half-levels
+            atmosphere (konrad.atmosphere.Atmosphere): Atmosphere model.
+            lapse (konrad.lapserate.LapseRate): Callable `f(p, T)` that
+                returns a temperature lapse rate in [K/day].
             surface (konrad.surface):
                 surface associated with old temperature profile
             timestep (float): only required for slow convection [days]
@@ -199,13 +194,11 @@ class HardAdjustment(Convection):
             ndarray: atmospheric temperature profile [K]
             float: surface temperature [K]
         """
-        lp = pressure_lapse_rate(p, phlev, T_rad, lapse)
-
         # This is the temperature profile required if we have a set-up with a
         # fixed surface temperature. In this case, energy is not conserved.
         if isinstance(surface, FixedTemperature):
             T_con = self.convective_profile(
-                T_rad, p, phlev, surface['temperature'], lp, timestep=timestep)
+                atmosphere, surface['temperature'], lapse, timestep=timestep)
             return T_con, surface['temperature']
 
         # Otherwise we should conserve energy --> our energy change should be
@@ -219,7 +212,7 @@ class HardAdjustment(Convection):
         # associated with an increase in energy in the atmosphere.
         surfaceTpos = surface['temperature']
         T_con, diff_pos = self.create_and_check_profile(
-            T_rad, p, phlev, surface, surfaceTpos, lp, timestep=timestep)
+            atmosphere, surface, surfaceTpos, lapse, timestep=timestep)
 
         # For other cases, if we find a decrease or approx no change in energy,
         # the atmosphere is not being warmed by the convection,
@@ -236,7 +229,7 @@ class HardAdjustment(Convection):
         # would not warm the atmosphere, so we do not change the atmospheric
         # temperature profile and calculate the energy change simply from the
         # surface temperature change.
-        surfaceTneg = np.array([np.min(T_rad)])
+        surfaceTneg = np.array([np.min(atmosphere["T"])])
         eff_Cp_s = surface.heat_capacity
         diff_neg = eff_Cp_s * (surfaceTneg - surface['temperature'])
         if np.abs(diff_neg) < near_zero:
@@ -254,7 +247,7 @@ class HardAdjustment(Convection):
             # Calculate temperature profile and energy change associated with
             # this surface temperature.
             T_con, diff = self.create_and_check_profile(
-                T_rad, p, phlev, surface, surfaceT, lp, timestep=timestep)
+                atmosphere, surface, surfaceT, lapse, timestep=timestep)
 
             # Update either upper or lower bound.
             if diff > 0:
@@ -273,7 +266,8 @@ class HardAdjustment(Convection):
 
         return T_con, surfaceT
 
-    def convective_profile(self, T_rad, p, phlev, surfaceT, lp, **kwargs):
+    @staticmethod
+    def get_moist_adiabat(atmosphere, surfaceT, lapse, **kwargs):
         """
         Assuming a particular surface temperature (surfaceT), create a new
         profile, following the specified lapse rate (lp) for the region where
@@ -282,39 +276,58 @@ class HardAdjustment(Convection):
         the stratosphere.
 
         Parameters:
-            T_rad (ndarray): radiative temperature profile [K]
-            p (ndarray): pressure levels [Pa]
-            phlev (ndarray): pressure half-levels [Pa]
+            atmosphere (konrad.atmosphere.Atmosphere): Atmosphere model.
             surfaceT (float): surface temperature [K]
-            lp (ndarray): pressure lapse rate [K/Pa]
+            lapse (konrad.lapserate.LapseRate): Callable `f(p, T)` that
+                returns a temperature lapse rate in [K/day].
 
         Returns:
              ndarray: convectively adjusted temperature profile [K]
         """
-        # for the lapse rate integral use a different dp, considering that the
-        # lapse rate is given on half levels
-        dp_lapse = np.hstack((np.array([p[0] - phlev[0]]), np.diff(p)))
-        T_con = surfaceT - np.cumsum(dp_lapse * lp)
+        g = constants.earth_standard_gravity
+        p = atmosphere["plev"][:]
+        T_con = atmosphere["T"][-1].copy()
+
+        # Use surface temperature.to calculate T of first atmosphere level.
+        p_s = atmosphere["phlev"][0]
+        T_s = surfaceT
+        rho_s = typhon.physics.density(p_s, T_s)
+        dp = p[0] - p_s
+        T_con[0] = T_s + dp * lapse(p_s, T_s) / (g * rho_s)
+
+        # Iterature through all atmosphere levels to calculate temperatures
+        # based on temperature and lapse-rate of the lower neighboring level.
+        for i in range(1, p.size):
+            gamma = lapse(p[i-1], T_con[i-1])
+            dp = p[i-1] - p[i]
+            rho = typhon.physics.density(p[i-1], T_con[i-1])
+
+            T_con[i] = T_con[i - 1] - dp * gamma / (g * rho)
+
+        return T_con
+
+    def convective_profile(self, atmosphere, surfaceT, lapse, **kwargs):
+        # The convective adjustment is only applied to the atmospheric profile,
+        # if it causes heating somewhere
+        T_rad = atmosphere["T"][-1]
+        T_con = self.get_moist_adiabat(atmosphere, surfaceT, lapse)
 
         if np.any(T_con > T_rad):
             contop = np.max(np.where(T_con > T_rad))
             T_con[contop+1:] = T_rad[contop+1:]
         else:
-            # convective adjustment is only applied to the atmospheric profile,
-            # if it causes heating somewhere
-            T_con = T_rad
+            return T_rad
 
         return T_con
 
-    def create_and_check_profile(self, T_rad, p, phlev, surface, surfaceT, lp,
+
+    def create_and_check_profile(self, atmosphere, surface, surfaceT, lapse,
                                  timestep=0.1):
         """Create a convectively adjusted temperature profile and calculate how
         close it is to satisfying energy conservation.
 
         Parameters:
-            T_rad (ndarray): old atmospheric temperature profile
-            p (ndarray): pressure levels
-            phlev (ndarray): half pressure levels
+            atmosphere (konrad.atmosphere.Atmosphere): Atmosphere model.
             surface (konrad.surface):
                 surface associated with old temperature profile
             surfaceT (float): surface temperature of the new profile
@@ -325,13 +338,14 @@ class HardAdjustment(Convection):
             ndarray: new atmospheric temperature profile
             float: energy difference between the new profile and the old one
         """
-        T_con = self.convective_profile(T_rad, p, phlev, surfaceT, lp,
+        T_rad = atmosphere["T"][-1]
+        T_con = self.convective_profile(atmosphere, surfaceT, lapse,
                                         timestep=timestep)
 
         eff_Cp_s = surface.heat_capacity
 
         diff = energy_difference(T_con, T_rad, surfaceT,
-                                 surface['temperature'], phlev, eff_Cp_s)
+                                 surface['temperature'], atmosphere["phlev"], eff_Cp_s)
         return T_con, float(diff)
 
     def update_convective_top(self, T_rad, T_con, p, timestep=0.1, lim=0.2):
