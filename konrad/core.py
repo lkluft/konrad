@@ -12,7 +12,7 @@ from konrad.ozone import (Ozone, OzonePressure)
 from konrad.humidity import FixedRH
 from konrad.surface import (Surface, SlabOcean, FixedTemperature)
 from konrad.cloud import (Cloud, ClearSky)
-from konrad.convection import (Convection, HardAdjustment, RelaxedAdjustment)
+from konrad.convection import (Convection, HardAdjustment, RelaxedAdjustment, EntrainedAdjustment)
 from konrad.lapserate import (LapseRate, MoistLapseRate)
 from konrad.upwelling import (Upwelling, NoUpwelling)
 
@@ -38,12 +38,12 @@ class RCE:
     def __init__(
         self,
         atmosphere,
-        timestep='6h',
-        max_duration='500d',
+        timestep='3h',
+        max_duration='5000d',
         outfile=None,
         experiment='RCE',
-        writeevery='24h',
-        delta=0.0,
+        writeevery='1d',
+        delta=1e-4,
         radiation=None,
         ozone=None,
         humidity=None,
@@ -101,7 +101,7 @@ class RCE:
                 Defaults to :class:`konrad.humidity.FixedRH`.
 
             surface (konrad.surface): Surface model.
-                Defaults to :class:`konrad.surface.SlabOcean`.
+                Defaults to :class:`konrad.surface.SurfaceHeatCapacity`.
 
             cloud (konrad.cloud): Cloud model.
                 Defaults to :class:`konrad.cloud.ClearSky`.
@@ -128,7 +128,7 @@ class RCE:
 
                 This keyword only affects the frequency with which the
                 log messages are generated. You have to enable the logging
-                by using the :py:mod:`logging` standard library or
+                by using the :module:`logging` standard library or
                 the `konrad.enable_logging()` convenience function.
 
             timestep_adjuster (callable): A callable object, that takes the
@@ -242,8 +242,7 @@ class RCE:
         if self.outfile is None:
             return False
 
-        if ((self.time - self.last_written) >= self.writeevery
-           or self.time == datetime.datetime(1, 1, 1)):
+        if (self.time - self.last_written) >= self.writeevery:
             self.last_written = self.time
             return True
         else:
@@ -324,7 +323,8 @@ class RCE:
             self.atmosphere.update_height()
             z = self.atmosphere.get('z')[0, :]
             if isinstance(self.convection, HardAdjustment) or isinstance(
-                    self.convection, RelaxedAdjustment):
+                    self.convection, RelaxedAdjustment) or isinstance(
+                    self.convection, EntrainedAdjustment):
                 self.convection.update_convective_top_height(z)
 
             # Update the ozone profile.
