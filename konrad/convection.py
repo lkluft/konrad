@@ -291,18 +291,35 @@ class HardAdjustment(Convection):
         # Use surface temperature.to calculate T of first atmosphere level.
         p_s = atmosphere["phlev"][0]
         T_s = surfaceT
+        dp = p_s - p[0]
         rho_s = typhon.physics.density(p_s, T_s)
-        dp = p[0] - p_s
-        T_con[0] = T_s + dp * lapse(p_s, T_s) / (g * rho_s)
+        gamma_s = lapse(p_s, T_s)
+
+        # Use intermediate level (Runge-Kutta) for more robust estimate.
+        _p = p_s - 0.5 * dp
+        _T = T_s - 0.5 * dp * gamma_s / (g * rho_s)
+        _rho = typhon.physics.density(_p, _T)
+        _gamma = lapse(_p, _T)
+
+        T_con[0] = T_s - dp * _gamma / (g * _rho)
 
         # Iterature through all atmosphere levels to calculate temperatures
         # based on temperature and lapse-rate of the lower neighboring level.
         for i in range(1, p.size):
-            gamma = lapse(p[i-1], T_con[i-1])
+            # Calculate temperature lapse-rate at level below.
             dp = p[i-1] - p[i]
+            gamma = lapse(p[i-1], T_con[i-1])
             rho = typhon.physics.density(p[i-1], T_con[i-1])
 
-            T_con[i] = T_con[i - 1] - dp * gamma / (g * rho)
+            # Calculate lapse-rate on auxiliary level (Runge-Kutta scheme).
+            _p = p[i-1] - 0.5 * dp
+            _T = T_con[i - 1] - 0.5 * dp * gamma / (g * rho)
+            _gamma = lapse(_p, _T)
+            _rho = typhon.physics.density(_p, _T)
+
+            # Use the temperature from the level below and the auxiliary
+            # lapse-rate to determine the temperature on the current level.
+            T_con[i] = T_con[i - 1] - dp * _gamma / (g * _rho)
 
         return T_con
 
