@@ -321,14 +321,6 @@ class HardAdjustment(Convection):
         surfaceTpos = surface['temperature']
         T_con, diff_pos = self.create_and_check_profile(
             T_rad, p, phlev, surface, surfaceTpos, lp, timestep=timestep)
-        if diff_pos>1e08:
-            print(p)
-            print(phlev)
-            print('**********')
-            print(surface['temperature'])
-            print('T_con=',T_con)
-            print('T_rad=',T_rad)
-            print(surfaceTpos)
 
         # For other cases, if we find a decrease or approx no change in energy,
         # the atmosphere is not being warmed by the convection,
