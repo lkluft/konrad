@@ -457,7 +457,7 @@ class RelaxedAdjustment(HardAdjustment):
 
         return tau
 
-    def convective_profile(self, T_rad, p, phlev, surfaceT, lp, timestep):
+    def convective_profile(self, atmosphere, surfaceT, lapse, timestep):
         """
         Assuming a particular surface temperature (surfaceT), create a new
         profile, which tries to follow the specified lapse rate (lp). How close
@@ -465,23 +465,18 @@ class RelaxedAdjustment(HardAdjustment):
         timescale and model timestep.
 
         Parameters:
-            T_rad (ndarray): radiative temperature profile [K]
-            p (ndarray): pressure levels [Pa]
-            phlev (ndarray): pressure half-levels [Pa]
+            atmosphere (konrad.atmosphere.Atmosphere): Atmosphere model.
             surfaceT (float): surface temperature [K]
-            lp (ndarray): pressure lapse rate [K/Pa]
+            lapse (konrad.lapserate.LapseRate): Callable `f(p, T)` that
+                returns a temperature lapse rate in [K/day].
             timestep (float/int): model timestep [days]
 
         Returns:
              ndarray: convectively adjusted temperature profile [K]
         """
-        # For the lapse rate integral use a dp, which takes into account that
-        # the lapse rate is given on the model half-levels.
-        dp_lapse = np.hstack((np.array([p[0] - phlev[0]]), np.diff(p)))
+        T_con = self.get_moist_adiabat(atmosphere, surfaceT, lapse)
 
-        tau = self.get_convective_tau(p)
-
+        tau = self.get_convective_tau(atmosphere["plev"])
         tf = 1 - np.exp(-timestep / tau)
-        T_con = T_rad * (1 - tf) + tf * (surfaceT - np.cumsum(dp_lapse * lp))
 
-        return T_con
+        return atmosphere["T"][0] * (1 - tf) + tf * T_con
