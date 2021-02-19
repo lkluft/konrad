@@ -262,6 +262,8 @@ class HardAdjustment(Convection):
             # to avoid getting stuck in a loop if something weird is going on
             counter += 1
             if counter == 100:
+                if np.isclose(surfaceTpos, surfaceTneg):
+                    break
                 raise ValueError(
                     "No energy conserving convective profile can be found"
                 )
