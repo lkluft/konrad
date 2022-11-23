@@ -260,7 +260,7 @@ class Atmosphere(Component):
         for variable in self.atmosphere_variables:
             # and create an interpolation function using the original data.
             f = interp1d(
-                self["plev"],
+                np.log(self["plev"]),
                 self[variable],
                 axis=-1,
                 fill_value="extrapolate",
@@ -268,7 +268,7 @@ class Atmosphere(Component):
             )
 
             # Store the interpolated new data in the data directory.
-            datadict[variable] = f(plev).ravel()
+            datadict[variable] = f(np.log(plev)).ravel()
 
         # Create a new atmosphere object from the filled data directory.
         new_atmosphere = type(self).from_dict(datadict)
